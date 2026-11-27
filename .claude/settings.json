@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read", "Edit", "Write",
+      "Bash(git status)", "Bash(git add *)", "Bash(git commit *)", "Bash(git checkout *)",
+      "Bash(git branch *)", "Bash(git push *)", "Bash(git diff *)", "Bash(git log *)",
+      "Bash(gh *)",
+      "Bash(./scripts/verify.sh*)",
+      "Bash(uv run pytest*)", "Bash(uv run ruff*)", "Bash(uv lock*)", "Bash(uv add*)", "Bash(uv sync*)",
+      "Bash(terraform fmt*)"
+    ],
+    "deny": [
+      "Bash(git push --force*)", "Bash(git reset --hard*)", "Bash(rm -rf*)", "Bash(gh pr merge*)",
+      "Bash(gh repo *)", "Bash(docker *)", "Bash(terraform apply*)", "Bash(terraform destroy*)",
+      "Bash(aws *)", "Bash(make *)"
+    ]
+  }
+}
