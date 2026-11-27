@@ -1,0 +1,36 @@
+[project]
+name = "ai-systems-lab"
+version = "0.1.0"
+description = "Small, working versions of common AI system designs, with measured trade-offs."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = ["labkit"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+labkit = { workspace = true }
+
+[tool.uv.workspace]
+# Explicit members only: uv rejects a member without a pyproject.toml.
+# Add each workstream when it starts. 00-foundation is docs only.
+members = ["lib"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib -m 'not gpu and not aws'"
+testpaths = ["lib/tests"]           # add each workstream's tests/ when it starts
+markers = [
+  "gpu: needs the 4090 and a running model server (run by hand)",
+  "aws: needs the lab AWS profile (run by hand)",
+]

@@ -221,3 +221,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+autoloop/run_history.jsonl
+.autoloop.lock
+
+# ai-systems-lab: lib/ is the labkit package, not a build artifact.
+# The Python template above ignores lib/; un-ignore it at the repo root.
+!/lib/
