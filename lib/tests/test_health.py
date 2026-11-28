@@ -146,6 +146,19 @@ def test_metrics_returns_renderer_bytes(server):
     assert body == b"lab_up 1\n"
 
 
+def test_metrics_renderer_error_is_500_without_leaking(checks, capfd):
+    def broken_renderer() -> bytes:
+        raise RuntimeError("token=example-secret")
+
+    with HealthServer(checks, metrics_renderer=broken_renderer) as running:
+        status, _, body = fetch(running.server_address[1], "/metrics")
+    sys.stderr.flush()
+
+    assert status == 500
+    assert body == b""
+    assert "example-secret" not in capfd.readouterr().err
+
+
 def test_metrics_404_without_renderer(checks):
     with HealthServer(checks) as running:
         status, _, _ = fetch(running.server_address[1], "/metrics")

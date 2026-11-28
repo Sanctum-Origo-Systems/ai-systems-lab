@@ -96,7 +96,12 @@ class _HealthHandler(BaseHTTPRequestHandler):
             payload = json.dumps(body).encode("utf-8")
             self._send(status, payload, JSON_CONTENT_TYPE, include_body=include_body)
         elif path == "/metrics" and self.server.metrics_renderer is not None:
-            payload = self.server.metrics_renderer()
+            try:
+                payload = self.server.metrics_renderer()
+            except Exception:
+                # Never echo the exception: its text could carry secrets.
+                self._send(HTTPStatus.INTERNAL_SERVER_ERROR, b"", "text/plain")
+                return
             self._send(HTTPStatus.OK, payload, METRICS_CONTENT_TYPE, include_body=include_body)
         else:
             self._send(HTTPStatus.NOT_FOUND, b"", "text/plain")
@@ -161,6 +166,11 @@ class HealthServer(ThreadingHTTPServer):
             self._thread.join()
             self._thread = None
         self.server_close()
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        # socketserver's default prints a traceback to stderr; drop it so a
+        # misbehaving client or handler bug never writes request details there.
+        return
 
     def __enter__(self) -> "HealthServer":
         self.start()
