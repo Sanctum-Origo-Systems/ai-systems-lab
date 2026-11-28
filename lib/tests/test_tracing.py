@@ -9,8 +9,6 @@ import pytest
 from labkit import log, tracing
 from labkit.tracing import TraceIdFilter, configure_tracing, current_trace_id
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -39,9 +37,18 @@ def no_otlp_exporter(monkeypatch):
     monkeypatch.setattr(tracing, "OTLPSpanExporter", refuse)
 
 
-def only_processor(provider):
-    [processor] = provider._active_span_processor._span_processors
-    return processor
+@pytest.fixture
+def fake_otlp_exporter(monkeypatch):
+    """Replace OTLPSpanExporter with in-memory exporters; return the ones created."""
+    created = []
+
+    def build(*args, **kwargs):
+        exporter = InMemorySpanExporter()
+        created.append(exporter)
+        return exporter
+
+    monkeypatch.setattr(tracing, "OTLPSpanExporter", build)
+    return created
 
 
 def test_off_without_env_or_exporter(no_otlp_exporter):
@@ -83,16 +90,78 @@ def test_otel_service_name_overrides_argument(monkeypatch):
 @pytest.mark.parametrize(
     "var", ["OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]
 )
-def test_endpoint_env_uses_batch_otlp_http(monkeypatch, var):
+def test_endpoint_env_exports_through_otlp_exporter(monkeypatch, fake_otlp_exporter, var):
     monkeypatch.setenv(var, "http://127.0.0.1:4318")
 
     provider = configure_tracing("svc", set_global=False)
 
     assert provider is not None
-    processor = only_processor(provider)
-    assert isinstance(processor, BatchSpanProcessor)
-    assert isinstance(processor.span_exporter, OTLPSpanExporter)
-    # No span was started, so shutdown has nothing to export and opens no connection.
+    with provider.get_tracer("test").start_as_current_span("handle-job"):
+        pass
+    assert provider.force_flush()
+    [exporter] = fake_otlp_exporter
+    [span] = exporter.get_finished_spans()
+    assert span.name == "handle-job"
+    provider.shutdown()
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", " True "])
+def test_sdk_disabled_turns_tracing_off_with_endpoint(monkeypatch, no_otlp_exporter, value):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", value)
+    before = trace.get_tracer_provider()
+
+    assert configure_tracing("svc") is None
+
+    assert trace.get_tracer_provider() is before
+    assert log._handler_filters == []
+
+
+def test_sdk_disabled_overrides_exporter_argument(monkeypatch):
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    before = trace.get_tracer_provider()
+
+    assert configure_tracing("svc", exporter=InMemorySpanExporter()) is None
+
+    assert trace.get_tracer_provider() is before
+    assert log._handler_filters == []
+
+
+def test_sdk_disabled_false_keeps_tracing_on(monkeypatch, fake_otlp_exporter):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "false")
+
+    provider = configure_tracing("svc", set_global=False)
+
+    assert provider is not None
+    assert len(fake_otlp_exporter) == 1
+    provider.shutdown()
+
+
+@pytest.mark.parametrize("value", ["none", " none "])
+def test_traces_exporter_none_skips_otlp(monkeypatch, no_otlp_exporter, value):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_TRACES_EXPORTER", value)
+    before = trace.get_tracer_provider()
+
+    assert configure_tracing("svc") is None
+
+    assert trace.get_tracer_provider() is before
+    assert log._handler_filters == []
+
+
+def test_traces_exporter_none_keeps_exporter_argument(monkeypatch, no_otlp_exporter):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_TRACES_EXPORTER", "none")
+    exporter = InMemorySpanExporter()
+
+    provider = configure_tracing("svc", exporter=exporter, set_global=False)
+
+    assert provider is not None
+    with provider.get_tracer("test").start_as_current_span("step"):
+        pass
+    [span] = exporter.get_finished_spans()
+    assert span.name == "step"
     provider.shutdown()
 
 
