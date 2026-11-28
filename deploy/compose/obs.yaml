@@ -1,0 +1,132 @@
+# Observability stack, opt-in with `--profile obs`: Prometheus, Grafana, Loki and Alloy.
+# Declares the `ai-systems-lab` network itself so this file parses on its own.
+# Only Grafana (TCP 3000) and Alloy's gelf intake (UDP 12201) publish, both on loopback.
+# Logs reach Loki over the network: no service mounts the Docker socket or anything
+# in the Docker state directory on the host.
+
+# One logging block for every service: the Docker gelf driver sends to Alloy's loopback
+# UDP publish. Non-blocking, so a stopped Alloy never blocks a container; dropped lines
+# are acceptable for lab logs. `docker logs` keeps working through Docker's dual logging.
+x-logging: &logging
+  driver: gelf
+  options:
+    gelf-address: udp://127.0.0.1:12201
+    tag: "{{.Name}}"
+    mode: non-blocking
+    max-buffer-size: 4m
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    profiles: ["obs"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    networks:
+      - ai-systems-lab
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    cpus: 1
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.2.7@sha256:9fd7619deb8923fc422f2183c3f82fc8dc2f668fd2b54b087336f597cfd92b0d
+    profiles: ["obs"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+    ports: ["127.0.0.1:3000:3000"]
+    labels:
+      lab.publish: "loopback"
+    volumes:
+      - grafanadata:/var/lib/grafana
+    networks:
+      - ai-systems-lab
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    cpus: 1
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+
+  # No in-container healthcheck, on purpose: the Loki image is distroless (no shell, no
+  # HTTP client, no health subcommand). Alloy waits on service_started instead, and Loki
+  # readiness is checked end to end in the manual hardware task.
+  loki:
+    image: grafana/loki:3.7.11@sha256:4c86f2ad5003304c8da84d29da2279b04eb999d716f8089c88e4fa4a44b0781e
+    profiles: ["obs"]
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=0700
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    networks:
+      - ai-systems-lab
+    cpus: 1
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *logging
+
+  # Receives gelf over UDP from the Docker daemon on the host's loopback and pushes to Loki.
+  # The image is Ubuntu-based with bash but no wget or curl, hence the /dev/tcp healthcheck.
+  alloy:
+    image: grafana/alloy:v1.22.0@sha256:9acc2529bc1edb7f5b2bd801dd8334ebc80c158e3a9e5526ecd7c9a273d43189
+    profiles: ["obs"]
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+    user: "473:473"
+    read_only: true
+    # tmpfs mounts are root-owned with the image directory's mode, so give the
+    # non-root user its own scratch dirs.
+    tmpfs:
+      - /var/lib/alloy/data:uid=473,gid=473,mode=0700
+      - /tmp:uid=473,gid=473,mode=0700
+    ports: ["127.0.0.1:12201:12201/udp"]
+    labels:
+      lab.publish: "loopback"
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    networks:
+      - ai-systems-lab
+    depends_on:
+      loki:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/127.0.0.1/12345 && printf 'GET /-/ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -Eq '^HTTP/1\\.[01] 200 '"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    cpus: 0.5
+    mem_limit: 256m
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  ai-systems-lab:
+    name: ai-systems-lab
+
+volumes:
+  promdata:
+  grafanadata:
+  lokidata:

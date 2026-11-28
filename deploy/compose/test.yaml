@@ -1,0 +1,21 @@
+# Throwaway Postgres for the test suite (`pg_url` fixture). Separate project name so it
+# never collides with the base stack. Data lives on tmpfs and is gone on stop.
+name: ai-systems-lab-test
+
+services:
+  test-postgres:
+    image: pgvector/pgvector:0.8.7-pg17@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd
+    environment:
+      POSTGRES_PASSWORD: example-test-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    ports: ["127.0.0.1:55432:5432"]
+    labels:
+      lab.publish: "loopback"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    cpus: 2
+    mem_limit: 1g
