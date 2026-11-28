@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The one gate: AutoLoop (verify + mutation gate), CI and Hedy all run this.
+# The one gate: AutoLoop (verify + mutation gate), CI and the maintainer all run this.
 # Rules: offline, no GPU, no AWS, no running stack, under ~3 minutes. Never skip silently.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,6 +16,15 @@ done
 
 # Terraform formatting is offline. `terraform validate` needs provider downloads, so it runs in CI only.
 if [ -d deploy/terraform ]; then terraform fmt -check -recursive deploy/terraform; fi
+
+# Offline IaC security scan. CI installs a pinned checkov; locally it is skipped (visibly) when absent.
+if [ -d deploy/terraform ]; then
+  if command -v checkov >/dev/null 2>&1; then
+    checkov -d deploy/terraform --framework terraform --compact --quiet --skip-download
+  else
+    echo "SKIP: checkov not installed; IaC security scan not run here (CI runs it)" >&2
+  fi
+fi
 
 # Section 7: no bare or 0.0.0.0 port publishes (added with 00 Task 3)
 if [ -f scripts/check_publish_binds.py ]; then uv run --locked python scripts/check_publish_binds.py; fi
