@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. Fictitious example values.
+ttl                 = "2026-12-31"
+monthly_budget_usd  = 25
+budget_alert_emails = ["alerts@example.com"]
+
+# ecr_repositories         = ["lab-admission", "lab-worker"]
+# enable_interface_endpoints = false
+# enable_nat_gateway         = false
