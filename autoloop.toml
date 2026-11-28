@@ -38,7 +38,16 @@ auto_merge = false
 # would land in one "other" bucket, so use repo-level metrics, as Patina does.
 auto_merge_promotion_level = "repo"
 
-triage_labels = ["ready", "rejected", "needs-decomposition", "in-progress", "in-review", "needs-human"]
+triage_labels = [
+  "ready",
+  "rejected",
+  "needs-decomposition",
+  "in-progress",
+  "in-review",
+  "needs-human",
+  "review-queue",
+  "external",
+]
 
 [implement]
 isolation = "worktree"   # each run gets its own worktree under ~/.autoloop/<hash>/worktrees/
