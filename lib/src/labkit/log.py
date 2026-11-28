@@ -1,7 +1,8 @@
 """Root logger setup shared by every service, built on the standard library only.
 
 `fmt="json"` writes one JSON object per line for machines; `fmt="console"` writes
-one short line per record for people. Both carry the service name and any `extra` keys.
+one short line per record for people. Both carry the service name, any `extra` keys,
+and `request_id` when one is bound with labkit.request_id.bind.
 """
 
 import json
@@ -10,6 +11,7 @@ import sys
 from datetime import UTC, datetime
 from typing import IO, Any, Literal
 
+from labkit.request_id import RequestIdFilter
 from labkit.settings import LabSettings
 
 LogFormat = Literal["json", "console"]
@@ -90,6 +92,7 @@ def configure_logging(
 
     handler = _LabkitHandler(stream if stream is not None else sys.stderr)
     handler.setFormatter(formatter)
+    handler.addFilter(RequestIdFilter())
     root.addHandler(handler)
     root.setLevel(level.upper())
 
