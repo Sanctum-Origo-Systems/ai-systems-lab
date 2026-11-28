@@ -2,7 +2,7 @@
 # Declares the `ai-systems-lab` network itself so this file parses on its own.
 # Only Grafana (TCP 3000) and Alloy's gelf intake (UDP 12201) publish, both on loopback.
 # Logs reach Loki over the network: no service mounts the Docker socket or anything
-# under /var/lib/docker.
+# in the Docker state directory on the host.
 
 # One logging block for every service: the Docker gelf driver sends to Alloy's loopback
 # UDP publish. Non-blocking, so a stopped Alloy never blocks a container; dropped lines
