@@ -1,0 +1,5 @@
+# Copy to backend.hcl (git-ignored), then: terraform -chdir=deploy/terraform/base init -backend-config=backend.hcl
+# The bucket is created once by deploy/terraform/bootstrap-state.sh.
+bucket = "example-ai-systems-lab-tfstate"
+key    = "base/terraform.tfstate"
+region = "us-east-1"

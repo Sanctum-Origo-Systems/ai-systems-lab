@@ -227,3 +227,12 @@ autoloop/run_history.jsonl
 # ai-systems-lab: lib/ is the labkit package, not a build artifact.
 # The Python template above ignores lib/; un-ignore it at the repo root.
 !/lib/
+
+# Terraform: local state, provider cache and per-account inputs stay out of git.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+backend.hcl
+crash.log
