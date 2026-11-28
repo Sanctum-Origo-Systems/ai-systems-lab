@@ -2,8 +2,10 @@
 
 configure_tracing does nothing unless an exporter is passed in or one of
 OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is set, so tests
-and local runs never need a collector. Spans go out over OTLP/HTTP. While a span is
-active, labkit.log lines carry its trace_id next to request_id.
+and local runs never need a collector. OTEL_SDK_DISABLED=true turns tracing off
+entirely, and OTEL_TRACES_EXPORTER=none turns off the env-selected exporter.
+Spans go out over OTLP/HTTP. While a span is active, labkit.log lines carry its
+trace_id next to request_id.
 """
 
 import logging
@@ -53,11 +55,20 @@ def configure_tracing(
     A passed exporter is wrapped in a SimpleSpanProcessor. Without one, an OTLP/HTTP
     exporter in a BatchSpanProcessor is used when an OTLP endpoint env var is set.
     OTEL_SERVICE_NAME, when set, overrides service_name.
+
+    OTEL_SDK_DISABLED=true returns None, even with a passed exporter.
+    OTEL_TRACES_EXPORTER=none skips the env-selected OTLP exporter but still honors a
+    passed exporter, since the caller asked for it directly.
     """
+    sdk_disabled = os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true"
+    traces_exporter = os.environ.get("OTEL_TRACES_EXPORTER", "").strip().lower()
+    if sdk_disabled:
+        return None
+
     processor: SpanProcessor
     if exporter is not None:
         processor = SimpleSpanProcessor(exporter)
-    elif any(os.environ.get(var) for var in _ENDPOINT_VARS):
+    elif traces_exporter != "none" and any(os.environ.get(var) for var in _ENDPOINT_VARS):
         processor = BatchSpanProcessor(OTLPSpanExporter())
     else:
         return None
