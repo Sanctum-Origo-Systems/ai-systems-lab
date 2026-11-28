@@ -1,0 +1,38 @@
+// Container logs arrive from the Docker gelf logging driver over UDP, so Alloy needs
+// neither the Docker socket nor a mount of /var/lib/docker/containers.
+loki.source.gelf "docker" {
+  listen_address = "0.0.0.0:12201"
+  relabel_rules  = loki.relabel.gelf.rules
+  forward_to     = [loki.write.local.receiver]
+}
+
+// Keep label cardinality low: `service` (container name, else the gelf tag) and `host`.
+// Every other __gelf_* field is internal and dropped before the push.
+// Each rule matches only a non-empty source, so a missing field never blanks a label.
+loki.relabel "gelf" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__gelf_message_tag"]
+    regex         = "(.+)"
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__gelf_message_container_name"]
+    regex         = "/?(.+)"
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__gelf_message_host"]
+    regex         = "(.+)"
+    target_label  = "host"
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -1,5 +1,18 @@
 # Base datastores shared by every workstream. No profile: always on.
 # Datastores publish nothing; other services reach them over the `ai-systems-lab` network.
+
+# One logging block for every service: the Docker gelf driver sends to Alloy's loopback
+# UDP publish (deploy/compose/obs.yaml). Non-blocking, so a stopped Alloy never blocks a
+# container; dropped lines are acceptable for lab logs. `docker logs` keeps working
+# through Docker's dual logging.
+x-logging: &logging
+  driver: gelf
+  options:
+    gelf-address: udp://127.0.0.1:12201
+    tag: "{{.Name}}"
+    mode: non-blocking
+    max-buffer-size: 4m
+
 services:
   postgres:
     image: pgvector/pgvector:0.8.7-pg17@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd
@@ -17,6 +30,7 @@ services:
     cpus: 2
     mem_limit: 2g
     restart: unless-stopped
+    logging: *logging
 
   elasticmq:
     image: softwaremill/elasticmq-native:1.7.1@sha256:e4580ab9ad1bd5cd37b4ba04911bc5ccc8cd2d9ab4de56ece65acee71c24e05c
@@ -30,6 +44,7 @@ services:
     cpus: 0.5
     mem_limit: 256m
     restart: unless-stopped
+    logging: *logging
 
 networks:
   ai-systems-lab:
