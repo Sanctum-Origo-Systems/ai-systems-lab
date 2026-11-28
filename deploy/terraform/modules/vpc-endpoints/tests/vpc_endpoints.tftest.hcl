@@ -46,7 +46,7 @@ run "defaults" {
   }
 
   assert {
-    condition     = output.interface_endpoint_ids == tomap({}) && output.endpoint_security_group_id == null
+    condition     = length(output.interface_endpoint_ids) == 0 && output.endpoint_security_group_id == null
     error_message = "Interface outputs must be an empty map and null when interface endpoints are off."
   }
 }
@@ -71,7 +71,7 @@ run "interface_on" {
   assert {
     condition = alltrue([
       for r in aws_security_group.vpce[0].ingress :
-      r.from_port == 443 && r.to_port == 443 && r.protocol == "tcp" && r.cidr_blocks == ["10.40.0.0/16"] && length(r.ipv6_cidr_blocks) == 0 && length(r.security_groups) == 0 && length(r.prefix_list_ids) == 0 && r.self == false
+      r.from_port == 443 && r.to_port == 443 && r.protocol == "tcp" && tolist(r.cidr_blocks) == tolist(["10.40.0.0/16"]) && length(coalesce(r.ipv6_cidr_blocks, [])) == 0 && length(coalesce(r.security_groups, [])) == 0 && length(coalesce(r.prefix_list_ids, [])) == 0 && !coalesce(r.self, false)
     ])
     error_message = "The ingress rule must be tcp 443 from var.vpc_cidr_block only."
   }
@@ -133,7 +133,7 @@ run "custom_services_and_cidr" {
   }
 
   assert {
-    condition     = alltrue([for r in aws_security_group.vpce[0].ingress : r.cidr_blocks == ["10.50.0.0/16"]])
+    condition     = alltrue([for r in aws_security_group.vpce[0].ingress : tolist(r.cidr_blocks) == tolist(["10.50.0.0/16"])])
     error_message = "Ingress must follow var.vpc_cidr_block."
   }
 }
