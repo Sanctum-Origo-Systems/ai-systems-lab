@@ -1,0 +1,255 @@
+name: Review queue
+
+# Rebuilds the body of the open issue labeled review-queue from live state:
+# open PRs in review order (next / ready / needs update / blocked / draft) and
+# the last 10 closed ones. Every run recomputes everything, so merging out of
+# order is safe. Dependencies are read from "Depends on: #N" lines in the PR
+# body and in the issue it closes. Interim until AutoLoop maintains this itself.
+
+on:
+  pull_request:
+    types: [opened, reopened, closed, synchronize, edited, ready_for_review, converted_to_draft]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: read
+  checks: read
+
+concurrency:
+  group: review-queue
+  cancel-in-progress: false
+
+jobs:
+  review-queue:
+    name: review-queue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            // Rebuilds the Review Queue issue body from the repo's live state.
+            // The Open table is recomputed from scratch on every run. PRs that left it
+            // move to Done, which keeps the last DONE_MAX entries and is cleared when
+            // Open is empty.
+            const OPEN_START = '<!-- review-queue:open -->';
+            const DONE_START = '<!-- review-queue:done -->';
+            const END = '<!-- review-queue:end -->';
+            const DONE_MAX = 10;
+            const SELF_CHECK = 'review-queue';
+            const PRIORITIES = ['p0', 'p1', 'p2'];
+            const DEPENDS_RE = /Depends on:?\s*(#\d+(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+|[ \t]+)#\d+)*)/gi;
+
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+            // PR titles and bodies are free text: keep them from breaking the table or
+            // notifying anyone.
+            function clean(text) {
+              return String(text || '')
+                .replace(/[\r\n]+/g, ' ')
+                .replace(/\|/g, '\\|')
+                .replace(/@/g, '@​')
+                .slice(0, 100);
+            }
+
+            function dependsOn(text) {
+              const nums = [];
+              for (const m of String(text || '').matchAll(DEPENDS_RE)) {
+                for (const n of m[1].matchAll(/#(\d+)/g)) {
+                  const num = Number(n[1]);
+                  if (!nums.includes(num)) nums.push(num);
+                }
+              }
+              return nums;
+            }
+
+            function closesIssue(body) {
+              const m = String(body || '').match(/\b(?:Closes|Fixes|Resolves) #(\d+)/i);
+              return m ? Number(m[1]) : null;
+            }
+
+            function section(body, start) {
+              const i = body.indexOf(start);
+              if (i < 0) return '';
+              const j = body.indexOf(END, i);
+              return j < 0 ? body.slice(i) : body.slice(i, j);
+            }
+
+            function prNumbersIn(text) {
+              return [...text.matchAll(/^\|[^|]*\| #(\d+) \|/gm)].map((m) => Number(m[1]));
+            }
+
+            function doneRows(text) {
+              return text.split('\n').filter((l) => /^\| #\d+ \|/.test(l));
+            }
+
+            async function run({ github, context, core, now = new Date(), retryMs = 10000 }) {
+              const { owner, repo } = context.repo;
+
+              const queues = await github.rest.issues.listForRepo({
+                owner, repo, labels: 'review-queue', state: 'open', per_page: 1,
+              });
+              if (!queues.data.length) {
+                core.setFailed('No open issue labeled review-queue');
+                return;
+              }
+              const rq = queues.data[0];
+              const oldBody = rq.body || '';
+
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+              const openNums = new Set(prs.map((p) => p.number));
+
+              const issueCache = new Map();
+              async function getIssue(n) {
+                if (!issueCache.has(n)) {
+                  try {
+                    issueCache.set(n, (await github.rest.issues.get({ owner, repo, issue_number: n })).data);
+                  } catch (e) {
+                    issueCache.set(n, null);
+                  }
+                }
+                return issueCache.get(n);
+              }
+
+              // GitHub computes mergeability lazily; right after a merge it's null.
+              async function mergeable(n) {
+                for (let attempt = 0; attempt < 3; attempt++) {
+                  const pr = (await github.rest.pulls.get({ owner, repo, pull_number: n })).data;
+                  if (pr.mergeable !== null) return pr.mergeable;
+                  if (attempt < 2) await sleep(retryMs);
+                }
+                return null;
+              }
+
+              async function ci(sha) {
+                const runs = await github.paginate(github.rest.checks.listForRef, {
+                  owner, repo, ref: sha, per_page: 100,
+                });
+                const others = runs.filter((c) => c.name !== SELF_CHECK);
+                if (others.some((c) => ['failure', 'timed_out', 'cancelled', 'action_required'].includes(c.conclusion))) return 'fail';
+                if (others.some((c) => c.status !== 'completed')) return 'pending';
+                return 'pass';
+              }
+
+              const rows = [];
+              for (const pr of prs) {
+                const issueNum = closesIssue(pr.body);
+                const issue = issueNum ? await getIssue(issueNum) : null;
+                const labels = [...(pr.labels || []), ...((issue && issue.labels) || [])].map((l) => l.name);
+                const priority = PRIORITIES.find((p) => labels.includes(p)) || 'p3';
+
+                const blockers = [];
+                for (const d of dependsOn(`${pr.body || ''}\n${(issue && issue.body) || ''}`)) {
+                  if (d === pr.number || d === issueNum) continue;
+                  const dep = await getIssue(d);
+                  // An issue or PR that is still open blocks; a closed issue whose PR is
+                  // still open blocks too, but that case is rare enough to ignore here.
+                  if (dep && dep.state === 'open') blockers.push(d);
+                }
+
+                const files = (await github.paginate(github.rest.pulls.listFiles, {
+                  owner, repo, pull_number: pr.number, per_page: 100,
+                })).map((f) => f.filename);
+
+                const [canMerge, ciState] = await Promise.all([mergeable(pr.number), ci(pr.head.sha)]);
+
+                let state;
+                const notes = [];
+                if (pr.draft) {
+                  state = 'draft';
+                } else if (blockers.length) {
+                  state = 'blocked';
+                  notes.push(`Depends on ${blockers.map((b) => `#${b}`).join(', ')}`);
+                } else if (canMerge === false) {
+                  state = 'needs update';
+                  notes.push('merge conflict');
+                } else if (ciState === 'fail') {
+                  state = 'needs update';
+                  notes.push('CI failing');
+                } else {
+                  state = 'ready';
+                  if (ciState === 'pending') notes.push('CI running');
+                  if (canMerge === null) notes.push('merge status pending');
+                }
+                rows.push({ pr, issueNum, priority, state, notes, files });
+              }
+
+              // Files shared with other open PRs: merging one makes the others need a refresh.
+              for (const r of rows) {
+                const shared = rows
+                  .filter((o) => o !== r && o.files.some((f) => r.files.includes(f)))
+                  .map((o) => `#${o.pr.number}`);
+                if (shared.length) {
+                  const both = r.files.filter((f) => rows.some((o) => o !== r && o.files.includes(f)));
+                  r.notes.push(`shares ${both.slice(0, 2).map((f) => `\`${f.split('/').pop()}\``).join(', ')} with ${shared.join(', ')}`);
+                }
+              }
+
+              const rank = { ready: 0, 'needs update': 1, blocked: 2, draft: 3 };
+              rows.sort((a, b) =>
+                rank[a.state] - rank[b.state] ||
+                a.priority.localeCompare(b.priority) ||
+                a.pr.number - b.pr.number);
+              const next = rows.find((r) => r.state === 'ready' && !r.notes.includes('CI running'));
+              if (next) next.state = 'next';
+
+              // Done: PRs listed as open last time that aren't open now, plus the PR that
+              // triggered this run if it just closed.
+              const leftOpen = prNumbersIn(section(oldBody, OPEN_START)).filter((n) => !openNums.has(n));
+              const payloadPr = context.payload && context.payload.pull_request;
+              if (payloadPr && payloadPr.state === 'closed' && !leftOpen.includes(payloadPr.number)) {
+                leftOpen.push(payloadPr.number);
+              }
+              let done = doneRows(section(oldBody, DONE_START));
+              const already = new Set(done.map((l) => Number(l.match(/^\| #(\d+)/)[1])));
+              for (const n of leftOpen) {
+                if (already.has(n)) continue;
+                const pr = (await github.rest.pulls.get({ owner, repo, pull_number: n })).data;
+                const issueNum = closesIssue(pr.body);
+                const result = pr.merged_at ? `merged ${pr.merged_at.slice(0, 10)}` : 'closed, not merged';
+                done.unshift(`| #${n} | ${issueNum ? `#${issueNum}` : '—'} | ${clean(pr.title)} | ${result} |`);
+              }
+              done = rows.length ? done.slice(0, DONE_MAX) : [];
+
+              const stamp = now.toISOString().slice(0, 16).replace('T', ' ');
+              const lines = [
+                'Open PRs in review order, rebuilt automatically on every PR change and CI run.',
+                'Review the one marked **next**. Merging out of order is fine: the list is recomputed from what is actually open.',
+                '',
+                OPEN_START,
+                `## Open (updated ${stamp} UTC)`,
+                '',
+              ];
+              if (rows.length) {
+                lines.push('| | PR | Issue | Title | State | Note |', '|---|---|---|---|---|---|');
+                for (const r of rows) {
+                  lines.push(`| ${r.state === 'next' ? '▶' : ''} | #${r.pr.number} | ${r.issueNum ? `#${r.issueNum}` : '—'} | ${clean(r.pr.title)} | ${r.state} | ${r.notes.join('; ')} |`);
+                }
+              } else {
+                lines.push('Nothing to review.');
+              }
+              lines.push(END, '', DONE_START, '## Done', '');
+              if (done.length) {
+                lines.push('| PR | Issue | Title | Result |', '|---|---|---|---|', ...done);
+              } else {
+                lines.push('Nothing yet.');
+              }
+              lines.push(END, '');
+
+              const body = lines.join('\n');
+              if (body.replace(/updated [^)]*\)/, '') !== oldBody.replace(/updated [^)]*\)/, '')) {
+                await github.rest.issues.update({ owner, repo, issue_number: rq.number, body });
+                core.info(`Updated #${rq.number}: ${rows.length} open, ${done.length} done`);
+              } else {
+                core.info('No change');
+              }
+            }
+
+
+            await run({ github, context, core });
