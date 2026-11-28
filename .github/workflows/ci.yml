@@ -68,6 +68,9 @@ jobs:
             echo "::group::$dir"
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
+            if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
+              terraform -chdir="$dir" test
+            fi
             echo "::endgroup::"
           done
       - name: Validate and test every shared module (mock provider, no credentials)
