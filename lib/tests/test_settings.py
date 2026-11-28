@@ -7,6 +7,8 @@ ENV_VARS = (
     "LAB_LOG_FORMAT",
     "LAB_AWS_REGION",
     "LAB_BATCH_SIZE",
+    "LAB_METRICS_PORT",
+    "LAB_METRICS_BIND",
     "QUEUE_ENDPOINT",
     "S3_ENDPOINT",
 )
@@ -85,6 +87,40 @@ def test_invalid_log_level_names_env_var(monkeypatch):
         load_settings()
 
     assert "LAB_LOG_LEVEL" in str(excinfo.value)
+
+
+def test_metrics_defaults():
+    settings = load_settings()
+
+    assert settings.metrics_port == 9100
+    assert settings.metrics_bind == "127.0.0.1"
+
+
+def test_metrics_env_vars_override(monkeypatch):
+    monkeypatch.setenv("LAB_METRICS_PORT", "9200")
+    monkeypatch.setenv("LAB_METRICS_BIND", "0.0.0.0")
+
+    settings = load_settings()
+
+    assert settings.metrics_port == 9200
+    assert settings.metrics_bind == "0.0.0.0"
+
+
+@pytest.mark.parametrize("port", ["0", "70000"])
+def test_metrics_port_out_of_range_names_env_var(monkeypatch, port):
+    monkeypatch.setenv("LAB_METRICS_PORT", port)
+
+    with pytest.raises(SettingsError) as excinfo:
+        load_settings()
+
+    assert "LAB_METRICS_PORT" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("port", ["1", "65535"])
+def test_metrics_port_range_is_inclusive(monkeypatch, port):
+    monkeypatch.setenv("LAB_METRICS_PORT", port)
+
+    assert load_settings().metrics_port == int(port)
 
 
 def test_every_error_is_reported(monkeypatch):
