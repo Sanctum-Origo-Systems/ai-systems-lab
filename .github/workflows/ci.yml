@@ -19,6 +19,7 @@ concurrency:
 env:
   TERRAFORM_VERSION: "1.17.2"
   GITLEAKS_VERSION: "8.30.1"
+  CHECKOV_VERSION: "3.4.11"
 
 jobs:
   verify:
@@ -35,6 +36,9 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+      # verify.sh runs the offline IaC security scan when checkov is on PATH.
+      - name: Install checkov (pinned)
+        run: uv tool install "checkov==${CHECKOV_VERSION}"
       - name: Run scripts/verify.sh
         run: ./scripts/verify.sh
 
@@ -64,6 +68,28 @@ jobs:
             echo "::group::$dir"
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
+            if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
+              terraform -chdir="$dir" test
+            fi
+            echo "::endgroup::"
+          done
+      - name: Validate and test every shared module (mock provider, no credentials)
+        run: |
+          shopt -s nullglob
+          mods=(deploy/terraform/modules/*/)
+          if [ ${#mods[@]} -eq 0 ]; then
+            echo "::notice title=module checks skipped::No modules under deploy/terraform/modules yet."
+            exit 0
+          fi
+          for dir in "${mods[@]}"; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
+              terraform -chdir="$dir" test
+            else
+              echo "::notice title=no terraform tests::$dir has no tests/*.tftest.hcl"
+            fi
             echo "::endgroup::"
           done
 
