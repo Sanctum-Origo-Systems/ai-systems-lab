@@ -1,0 +1,44 @@
+// Container logs arrive from the Docker gelf logging driver over UDP, so Alloy needs
+// neither the Docker socket nor a mount of the Docker state directory on the host.
+loki.source.gelf "docker" {
+  listen_address = "0.0.0.0:12201"
+  relabel_rules  = loki.relabel.gelf.rules
+  forward_to     = [loki.process.gelf.receiver]
+}
+
+// loki.source.gelf exposes only a few internal labels (host, level, facility); Docker's
+// extra fields such as _tag arrive inside the GELF JSON line. Keep `host` here, and drop
+// every other __gelf_* field before the push.
+loki.relabel "gelf" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__gelf_message_host"]
+    regex         = "(.+)"
+    target_label  = "host"
+  }
+}
+
+// Turn the GELF JSON into a plain log line, labelled by service (the gelf tag, which
+// compose sets to the container name). Label cardinality stays at service + host.
+loki.process "gelf" {
+  stage.json {
+    expressions = { service = "_tag", message = "short_message" }
+  }
+
+  stage.labels {
+    values = { service = "" }
+  }
+
+  stage.output {
+    source = "message"
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

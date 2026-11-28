@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The one gate: AutoLoop (verify + mutation gate), CI and Hedy all run this.
+# The one gate: AutoLoop (verify + mutation gate), CI and the maintainer all run this.
 # Rules: offline, no GPU, no AWS, no running stack, under ~3 minutes. Never skip silently.
 set -euo pipefail
 cd "$(dirname "$0")/.."
