@@ -2,8 +2,9 @@ name: Review queue
 
 # Rebuilds the body of the open issue labeled review-queue from live state:
 # open PRs in review order (next / ready / needs update / blocked / draft) and
-# the last 10 closed ones. Every run recomputes everything, so merging out of
-# order is safe. Dependencies are read from "Depends on: #N" lines in the PR
+# the 10 most recently closed PRs. Every run recomputes both from GitHub, so
+# merging out of order is safe and the Done history can't be lost.
+# Dependencies are read from "Depends on: #N" lines in the PR
 # body and in the issue it closes. Interim until AutoLoop maintains this itself.
 
 on:
@@ -33,9 +34,8 @@ jobs:
         with:
           script: |
             // Rebuilds the Review Queue issue body from the repo's live state.
-            // The Open table is recomputed from scratch on every run. PRs that left it
-            // move to Done, which keeps the last DONE_MAX entries and is cleared when
-            // Open is empty.
+            // Both tables are recomputed from scratch on every run: Open from the open
+            // PRs, Done from the DONE_MAX most recently closed PRs.
             const OPEN_START = '<!-- review-queue:open -->';
             const DONE_START = '<!-- review-queue:done -->';
             const END = '<!-- review-queue:end -->';
@@ -72,21 +72,6 @@ jobs:
               return m ? Number(m[1]) : null;
             }
 
-            function section(body, start) {
-              const i = body.indexOf(start);
-              if (i < 0) return '';
-              const j = body.indexOf(END, i);
-              return j < 0 ? body.slice(i) : body.slice(i, j);
-            }
-
-            function prNumbersIn(text) {
-              return [...text.matchAll(/^\|[^|]*\| #(\d+) \|/gm)].map((m) => Number(m[1]));
-            }
-
-            function doneRows(text) {
-              return text.split('\n').filter((l) => /^\| #\d+ \|/.test(l));
-            }
-
             async function run({ github, context, core, now = new Date(), retryMs = 10000 }) {
               const { owner, repo } = context.repo;
 
@@ -103,7 +88,6 @@ jobs:
               const prs = await github.paginate(github.rest.pulls.list, {
                 owner, repo, state: 'open', per_page: 100,
               });
-              const openNums = new Set(prs.map((p) => p.number));
 
               const issueCache = new Map();
               async function getIssue(n) {
@@ -199,23 +183,20 @@ jobs:
               const next = rows.find((r) => r.state === 'ready' && !r.notes.includes('CI running'));
               if (next) next.state = 'next';
 
-              // Done: PRs listed as open last time that aren't open now, plus the PR that
-              // triggered this run if it just closed.
-              const leftOpen = prNumbersIn(section(oldBody, OPEN_START)).filter((n) => !openNums.has(n));
-              const payloadPr = context.payload && context.payload.pull_request;
-              if (payloadPr && payloadPr.state === 'closed' && !leftOpen.includes(payloadPr.number)) {
-                leftOpen.push(payloadPr.number);
-              }
-              let done = doneRows(section(oldBody, DONE_START));
-              const already = new Set(done.map((l) => Number(l.match(/^\| #(\d+)/)[1])));
-              for (const n of leftOpen) {
-                if (already.has(n)) continue;
-                const pr = (await github.rest.pulls.get({ owner, repo, pull_number: n })).data;
-                const issueNum = closesIssue(pr.body);
-                const result = pr.merged_at ? `merged ${pr.merged_at.slice(0, 10)}` : 'closed, not merged';
-                done.unshift(`| #${n} | ${issueNum ? `#${issueNum}` : '—'} | ${clean(pr.title)} | ${result} |`);
-              }
-              done = rows.length ? done.slice(0, DONE_MAX) : [];
+              // Done: the most recently closed PRs, read from GitHub each run, so the
+              // history never depends on what an earlier run wrote.
+              const closed = (await github.rest.pulls.list({
+                owner, repo, state: 'closed', sort: 'updated', direction: 'desc', per_page: 50,
+              })).data;
+              const done = closed
+                .filter((pr) => pr.closed_at)
+                .sort((a, b) => b.closed_at.localeCompare(a.closed_at))
+                .slice(0, DONE_MAX)
+                .map((pr) => {
+                  const issueNum = closesIssue(pr.body);
+                  const result = pr.merged_at ? `merged ${pr.merged_at.slice(0, 10)}` : 'closed, not merged';
+                  return `| #${pr.number} | ${issueNum ? `#${issueNum}` : '—'} | ${clean(pr.title)} | ${result} |`;
+                });
 
               const stamp = now.toISOString().slice(0, 16).replace('T', ' ');
               const lines = [
@@ -238,7 +219,7 @@ jobs:
               if (done.length) {
                 lines.push('| PR | Issue | Title | Result |', '|---|---|---|---|', ...done);
               } else {
-                lines.push('Nothing yet.');
+                lines.push('No closed PRs yet.');
               }
               lines.push(END, '');
 
