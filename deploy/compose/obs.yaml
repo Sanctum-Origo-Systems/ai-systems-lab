@@ -1,0 +1,53 @@
+# Observability pair, opt-in with `--profile obs`.
+# Declares the `lab` network itself so this file parses on its own.
+# Only Grafana publishes, and only on loopback.
+services:
+  prometheus:
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    profiles: ["obs"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    networks:
+      - lab
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    cpus: 1
+    mem_limit: 1g
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.7@sha256:9fd7619deb8923fc422f2183c3f82fc8dc2f668fd2b54b087336f597cfd92b0d
+    profiles: ["obs"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+    ports: ["127.0.0.1:3000:3000"]
+    labels:
+      lab.publish: "loopback"
+    volumes:
+      - grafanadata:/var/lib/grafana
+    networks:
+      - lab
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    cpus: 1
+    mem_limit: 512m
+    restart: unless-stopped
+
+networks:
+  lab:
+    name: lab
+
+volumes:
+  promdata:
+  grafanadata:
