@@ -1,6 +1,6 @@
 name: CI
 
-# Spec section 7 and 11.2: CI runs the same gate as AutoLoop and Hedy (scripts/verify.sh),
+# Spec section 7 and 11.2: CI runs the same gate as AutoLoop and the maintainer (scripts/verify.sh),
 # then the checks that need the network: terraform validate and gitleaks.
 # A check whose inputs don't exist yet is skipped with a visible ::notice::, never silently.
 
