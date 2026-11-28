@@ -53,7 +53,7 @@ variable "kms_key_arn" {
 # No aws_ecr_repository_policy is created, so only principals in this account
 # with IAM permissions can pull or push. There is no cross-account access.
 resource "aws_ecr_repository" "this" {
-  #checkov:skip=CKV_AWS_136:KMS encryption is opt-in through encryption_type; the AES256 default avoids KMS key charges on an idle lab account.
+  #checkov:skip=CKV_AWS_136:Decided: AWS-managed encryption (AES256) instead of a customer-managed KMS key. A lab stack torn down after every demo gains little from its own key; KMS stays opt-in through encryption_type.
   for_each = var.repositories
 
   name                 = each.value

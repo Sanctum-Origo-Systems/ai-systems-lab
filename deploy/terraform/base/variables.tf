@@ -38,13 +38,13 @@ variable "cidr_block" {
 }
 
 variable "enable_nat_gateway" {
-  description = "Create one NAT gateway (about $33/month plus per-GB processing). Off by default: private subnets use VPC endpoints instead."
+  description = "Create one NAT gateway in one AZ for private egress (about $33/month plus per-GB processing). Decided: this is the egress path for workstreams that deploy, because it costs about a third of the interface endpoints. The free S3 gateway endpoint stays on, so S3 traffic and model weights skip NAT processing charges. Off in base so an idle account costs nothing."
   type        = bool
   default     = false
 }
 
 variable "enable_interface_endpoints" {
-  description = "Create the interface VPC endpoints (ECR, logs, SSM, STS). About $100/month for 7 services in 2 AZs, so off while idle."
+  description = "Create the interface VPC endpoints (ECR, logs, SSM, STS). Optional: about $100/month for 7 services in 2 AZs. Decided: NAT plus the S3 gateway endpoint is the default egress path, and this stays off unless a workstream needs private-only egress."
   type        = bool
   default     = false
 }
