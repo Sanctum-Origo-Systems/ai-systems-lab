@@ -29,7 +29,7 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib -m 'not gpu and not aws'"
-testpaths = ["lib/tests"]           # add each workstream's tests/ when it starts
+testpaths = ["lib/tests", "scripts/tests"]         # add each workstream's tests/ when it starts
 markers = [
   "gpu: needs the 4090 and a running model server (run by hand)",
   "aws: needs the lab AWS profile (run by hand)",
