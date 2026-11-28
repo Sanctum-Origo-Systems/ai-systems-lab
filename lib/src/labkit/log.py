@@ -2,7 +2,8 @@
 
 `fmt="json"` writes one JSON object per line for machines; `fmt="console"` writes
 one short line per record for people. Both carry the service name, any `extra` keys,
-and `request_id` when one is bound with labkit.request_id.bind.
+and `request_id` when one is bound with labkit.request_id.bind, plus `trace_id` while
+a span is active once labkit.tracing.configure_tracing has turned tracing on.
 """
 
 import json
@@ -70,6 +71,24 @@ class _LabkitHandler(logging.StreamHandler):
     """Marker class so a repeat configure_logging call can find and replace it."""
 
 
+# Filters other labkit modules add (labkit.tracing's TraceIdFilter); configure_logging
+# puts them on every handler it installs, so call order does not matter.
+_handler_filters: list[logging.Filter] = []
+
+
+def add_handler_filter(extra: logging.Filter) -> None:
+    """Put extra on labkit's log handler now and on any configure_logging installs later.
+
+    At most one filter per class is kept, so repeat calls do not stack duplicates.
+    """
+    if any(type(f) is type(extra) for f in _handler_filters):
+        return
+    _handler_filters.append(extra)
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, _LabkitHandler):
+            handler.addFilter(extra)
+
+
 def configure_logging(
     service_name: str,
     level: str = "INFO",
@@ -93,6 +112,8 @@ def configure_logging(
     handler = _LabkitHandler(stream if stream is not None else sys.stderr)
     handler.setFormatter(formatter)
     handler.addFilter(RequestIdFilter())
+    for extra in _handler_filters:
+        handler.addFilter(extra)
     root.addHandler(handler)
     root.setLevel(level.upper())
 
