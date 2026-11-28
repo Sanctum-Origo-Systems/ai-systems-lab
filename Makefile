@@ -17,7 +17,7 @@ TEST_COMPOSE := docker compose -f deploy/compose/test.yaml
 # Compose files for WS: 00 is the shared base (plus obs with OBS=1); any other
 # workstream uses its own <WS>-<name>/compose.yaml.
 ifeq ($(WS),00)
-  COMPOSE_FILES := -f deploy/compose/base.yaml$(if $(filter 1,$(OBS)), -f deploy/compose/obs.yaml --profile obs)
+  COMPOSE_FILES := -p ai-systems-lab -f deploy/compose/base.yaml$(if $(filter 1,$(OBS)), -f deploy/compose/obs.yaml --profile obs)
 else ifneq ($(WS),)
   WS_COMPOSE := $(firstword $(wildcard $(WS)-*/compose.yaml))
   COMPOSE_FILES := $(if $(WS_COMPOSE),-f $(WS_COMPOSE))
