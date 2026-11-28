@@ -1,5 +1,5 @@
 # Observability pair, opt-in with `--profile obs`.
-# Declares the `lab` network itself so this file parses on its own.
+# Declares the `ai-systems-lab` network itself so this file parses on its own.
 # Only Grafana publishes, and only on loopback.
 services:
   prometheus:
@@ -13,7 +13,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - promdata:/prometheus
     networks:
-      - lab
+      - ai-systems-lab
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/ready"]
       interval: 10s
@@ -34,7 +34,7 @@ services:
     volumes:
       - grafanadata:/var/lib/grafana
     networks:
-      - lab
+      - ai-systems-lab
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
       interval: 10s
@@ -45,8 +45,8 @@ services:
     restart: unless-stopped
 
 networks:
-  lab:
-    name: lab
+  ai-systems-lab:
+    name: ai-systems-lab
 
 volumes:
   promdata:
