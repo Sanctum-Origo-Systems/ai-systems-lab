@@ -24,3 +24,15 @@ variable "enable_nat_gateway" {
   type        = bool
   default     = false
 }
+
+variable "enable_flow_logs" {
+  description = "Send VPC flow logs (all traffic) to a CloudWatch log group."
+  type        = bool
+  default     = true
+}
+
+variable "flow_log_retention_days" {
+  description = "Retention in days for the flow log group."
+  type        = number
+  default     = 7
+}

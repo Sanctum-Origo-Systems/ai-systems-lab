@@ -1,15 +1,3 @@
-variable "enable_flow_logs" {
-  description = "Send VPC flow logs (all traffic) to a CloudWatch log group."
-  type        = bool
-  default     = true
-}
-
-variable "flow_log_retention_days" {
-  description = "Retention in days for the flow log group."
-  type        = number
-  default     = 7
-}
-
 data "aws_caller_identity" "current" {}
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
@@ -47,7 +35,7 @@ resource "aws_iam_role" "flow_logs" {
   }
 }
 
-# Write access to this one log group only: no "*" resource.
+# Write access to this one log group only: no wildcard resource.
 resource "aws_iam_role_policy" "flow_logs" {
   count = var.enable_flow_logs ? 1 : 0
 

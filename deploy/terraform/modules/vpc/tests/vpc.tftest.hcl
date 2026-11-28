@@ -1,7 +1,26 @@
 # Offline tests: the mocked AWS provider needs no credentials and makes no AWS calls.
-# Run with: terraform -chdir=deploy/terraform/modules/vpc init && terraform -chdir=deploy/terraform/modules/vpc test
+# Run with: terraform -chdir=deploy/terraform/modules/vpc init -backend=false && terraform -chdir=deploy/terraform/modules/vpc test
 
-mock_provider "aws" {}
+mock_provider "aws" {
+  # Computed ARNs must look like ARNs, or the provider's own validation rejects the mock values.
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-east-1:111111111111:log-group:/vpc/test/flow-logs"
+    }
+  }
+
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::111111111111:role/test-flow-logs"
+    }
+  }
+
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "111111111111"
+    }
+  }
+}
 
 variables {
   name = "test"
@@ -62,7 +81,7 @@ run "defaults" {
   }
 
   assert {
-    condition     = aws_flow_log.this[0].traffic_type == "ALL" && aws_flow_log.this[0].vpc_id == aws_vpc.this.id
+    condition     = length(aws_flow_log.this) == 1 && aws_flow_log.this[0].traffic_type == "ALL" && aws_flow_log.this[0].vpc_id == aws_vpc.this.id
     error_message = "Flow log must capture ALL traffic for the VPC."
   }
 
@@ -115,12 +134,12 @@ run "defaults" {
   }
 
   assert {
-    condition     = aws_vpc.this.tags == { Name = "test" }
+    condition     = aws_vpc.this.tags == tomap({ Name = "test" })
     error_message = "Resources must set only a Name tag derived from var.name."
   }
 }
 
-run "nat_enabled" {
+run "nat_on" {
   command = apply
 
   variables {
@@ -143,7 +162,7 @@ run "nat_enabled" {
   }
 }
 
-run "flow_logs_disabled" {
+run "flow_logs_off" {
   command = apply
 
   variables {
@@ -190,7 +209,7 @@ run "rejects_one_az" {
   expect_failures = [var.azs]
 }
 
-run "rejects_three_azs" {
+run "bad_azs" {
   command = plan
 
   variables {
