@@ -70,6 +70,25 @@ jobs:
             terraform -chdir="$dir" validate
             echo "::endgroup::"
           done
+      - name: Validate and test every shared module (mock provider, no credentials)
+        run: |
+          shopt -s nullglob
+          mods=(deploy/terraform/modules/*/)
+          if [ ${#mods[@]} -eq 0 ]; then
+            echo "::notice title=module checks skipped::No modules under deploy/terraform/modules yet."
+            exit 0
+          fi
+          for dir in "${mods[@]}"; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            if compgen -G "${dir}tests/*.tftest.hcl" > /dev/null; then
+              terraform -chdir="$dir" test
+            else
+              echo "::notice title=no terraform tests::$dir has no tests/*.tftest.hcl"
+            fi
+            echo "::endgroup::"
+          done
 
   gitleaks:
     name: gitleaks
