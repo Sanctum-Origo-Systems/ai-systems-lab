@@ -34,7 +34,7 @@ jobs:
           script: |
             // Rebuilds the Review Queue issue body from the repo's live state.
             // The Open table is recomputed from scratch on every run. PRs that left it
-            // move to Done, which keeps the last DONE_MAX entries and is cleared when
+            // move to Done, which keeps the last DONE_MAX entries, including when
             // Open is empty.
             const OPEN_START = '<!-- review-queue:open -->';
             const DONE_START = '<!-- review-queue:done -->';
@@ -215,7 +215,7 @@ jobs:
                 const result = pr.merged_at ? `merged ${pr.merged_at.slice(0, 10)}` : 'closed, not merged';
                 done.unshift(`| #${n} | ${issueNum ? `#${issueNum}` : '—'} | ${clean(pr.title)} | ${result} |`);
               }
-              done = rows.length ? done.slice(0, DONE_MAX) : [];
+              done = done.slice(0, DONE_MAX);
 
               const stamp = now.toISOString().slice(0, 16).replace('T', ' ');
               const lines = [
