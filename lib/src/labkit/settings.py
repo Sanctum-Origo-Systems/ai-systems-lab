@@ -29,6 +29,9 @@ class LabSettings(BaseSettings):
     # None means "use AWS"; set to point at a local stand-in.
     queue_endpoint: str | None = Field(default=None, validation_alias="QUEUE_ENDPOINT")
     s3_endpoint: str | None = Field(default=None, validation_alias="S3_ENDPOINT")
+    # Where labkit.health.HealthServer serves /healthz, /readyz and /metrics.
+    metrics_port: int = Field(default=9100, ge=1, le=65535)
+    metrics_bind: str = "127.0.0.1"
 
     @classmethod
     def settings_customise_sources(
