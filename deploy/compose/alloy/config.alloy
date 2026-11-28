@@ -1,5 +1,5 @@
 // Container logs arrive from the Docker gelf logging driver over UDP, so Alloy needs
-// neither the Docker socket nor a mount of /var/lib/docker/containers.
+// neither the Docker socket nor a mount of the Docker state directory on the host.
 loki.source.gelf "docker" {
   listen_address = "0.0.0.0:12201"
   relabel_rules  = loki.relabel.gelf.rules
