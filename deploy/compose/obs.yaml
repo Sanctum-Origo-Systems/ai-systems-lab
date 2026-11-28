@@ -70,7 +70,7 @@ services:
     user: "10001:10001"
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:uid=10001,gid=10001,mode=0700
     volumes:
       - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
       - lokidata:/loki
@@ -93,9 +93,11 @@ services:
       - --server.http.listen-addr=0.0.0.0:12345
     user: "473:473"
     read_only: true
+    # tmpfs mounts are root-owned with the image directory's mode, so give the
+    # non-root user its own scratch dirs.
     tmpfs:
-      - /var/lib/alloy/data
-      - /tmp
+      - /var/lib/alloy/data:uid=473,gid=473,mode=0700
+      - /tmp:uid=473,gid=473,mode=0700
     ports: ["127.0.0.1:12201:12201/udp"]
     labels:
       lab.publish: "loopback"
@@ -111,7 +113,7 @@ services:
         - CMD
         - bash
         - -c
-        - "exec 3<>/dev/tcp/127.0.0.1/12345 && printf 'GET /-/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q 200 <&3"
+        - "exec 3<>/dev/tcp/127.0.0.1/12345 && printf 'GET /-/ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -Eq '^HTTP/1\\.[01] 200 '"
       interval: 10s
       timeout: 3s
       retries: 10

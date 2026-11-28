@@ -3,32 +3,38 @@
 loki.source.gelf "docker" {
   listen_address = "0.0.0.0:12201"
   relabel_rules  = loki.relabel.gelf.rules
-  forward_to     = [loki.write.local.receiver]
+  forward_to     = [loki.process.gelf.receiver]
 }
 
-// Keep label cardinality low: `service` (container name, else the gelf tag) and `host`.
-// Every other __gelf_* field is internal and dropped before the push.
-// Each rule matches only a non-empty source, so a missing field never blanks a label.
+// loki.source.gelf exposes only a few internal labels (host, level, facility); Docker's
+// extra fields such as _tag arrive inside the GELF JSON line. Keep `host` here, and drop
+// every other __gelf_* field before the push.
 loki.relabel "gelf" {
   forward_to = []
-
-  rule {
-    source_labels = ["__gelf_message_tag"]
-    regex         = "(.+)"
-    target_label  = "service"
-  }
-
-  rule {
-    source_labels = ["__gelf_message_container_name"]
-    regex         = "/?(.+)"
-    target_label  = "service"
-  }
 
   rule {
     source_labels = ["__gelf_message_host"]
     regex         = "(.+)"
     target_label  = "host"
   }
+}
+
+// Turn the GELF JSON into a plain log line, labelled by service (the gelf tag, which
+// compose sets to the container name). Label cardinality stays at service + host.
+loki.process "gelf" {
+  stage.json {
+    expressions = { service = "_tag", message = "short_message" }
+  }
+
+  stage.labels {
+    values = { service = "" }
+  }
+
+  stage.output {
+    source = "message"
+  }
+
+  forward_to = [loki.write.local.receiver]
 }
 
 loki.write "local" {

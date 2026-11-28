@@ -7,7 +7,6 @@ Alloy and Loki config checks read the files as text and need no docker CLI.
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -38,13 +37,8 @@ ALLOY_HEALTHCHECK = [
     "bash",
     "-c",
     "exec 3<>/dev/tcp/127.0.0.1/12345 && printf 'GET /-/ready HTTP/1.0\\r\\n\\r\\n' >&3"
-    " && grep -q 200 <&3",
+    " && head -n 1 <&3 | grep -Eq '^HTTP/1\\.[01] 200 '",
 ]
-
-requires_docker = pytest.mark.skipif(
-    shutil.which("docker") is None,
-    reason="docker CLI not installed: compose logging checks need `docker compose config`",
-)
 
 
 def compose_config(name: str, *profiles: str) -> dict:
@@ -80,7 +74,6 @@ def _all_services(configs: dict[str, dict]):
             yield f"{source}:{name}", service
 
 
-@requires_docker
 def test_obs_declares_loki_and_alloy(obs):
     assert {"prometheus", "grafana", "loki", "alloy"} <= set(obs)
     for name in ("loki", "alloy"):
@@ -88,7 +81,6 @@ def test_obs_declares_loki_and_alloy(obs):
         assert set(obs[name]["networks"]) == {"ai-systems-lab"}
 
 
-@requires_docker
 def test_every_service_ships_logs_over_nonblocking_gelf(configs):
     services = dict(_all_services(configs))
     assert {"base.yaml:postgres", "obs.yaml:loki", "obs.yaml:alloy"} <= set(services)
@@ -96,7 +88,6 @@ def test_every_service_ships_logs_over_nonblocking_gelf(configs):
         assert service.get("logging") == EXPECTED_LOGGING, where
 
 
-@requires_docker
 def test_no_service_mounts_docker_socket_or_state(configs):
     for where, service in _all_services(configs):
         for volume in service.get("volumes") or []:
@@ -106,7 +97,6 @@ def test_no_service_mounts_docker_socket_or_state(configs):
             assert "docker.sock" not in source, where
 
 
-@requires_docker
 def test_every_image_is_pinned_by_digest(configs):
     for where, service in _all_services(configs):
         assert "@sha256:" in service["image"], where
@@ -133,20 +123,18 @@ def test_non_root_numeric_user_rule(user, ok):
     assert _is_non_root_numeric(user) is ok
 
 
-@requires_docker
 def test_collectors_run_as_non_root_numeric_users(obs):
     for name in ("loki", "alloy"):
         assert _is_non_root_numeric(obs[name].get("user", "")), name
 
 
-@requires_docker
 def test_loki_is_unprivileged_unpublished_and_mounted_read_only(obs):
     loki = obs["loki"]
     assert loki["image"] == LOKI_IMAGE
     assert loki["command"] == ["-config.file=/etc/loki/loki.yaml"]
     assert loki["user"] == "10001:10001"
     assert loki["read_only"] is True
-    assert "/tmp" in loki["tmpfs"]
+    assert loki["tmpfs"] == ["/tmp:uid=10001,gid=10001,mode=0700"]
     assert loki.get("cpus") and loki.get("mem_limit")
     assert not loki.get("ports")
     assert "healthcheck" not in loki or loki["healthcheck"].get("disable")
@@ -159,7 +147,6 @@ def test_loki_is_unprivileged_unpublished_and_mounted_read_only(obs):
     assert mounts["/loki"]["type"] == "volume"
 
 
-@requires_docker
 def test_alloy_publishes_only_gelf_udp_on_loopback(obs):
     alloy = obs["alloy"]
     assert alloy["image"] == ALLOY_IMAGE
@@ -171,7 +158,10 @@ def test_alloy_publishes_only_gelf_udp_on_loopback(obs):
     ]
     assert alloy["user"] == "473:473"
     assert alloy["read_only"] is True
-    assert set(alloy["tmpfs"]) == {"/var/lib/alloy/data", "/tmp"}
+    assert set(alloy["tmpfs"]) == {
+        "/var/lib/alloy/data:uid=473,gid=473,mode=0700",
+        "/tmp:uid=473,gid=473,mode=0700",
+    }
     assert alloy.get("cpus") and alloy.get("mem_limit")
     assert alloy["labels"]["lab.publish"] == "loopback"
     ports = [
@@ -185,7 +175,6 @@ def test_alloy_publishes_only_gelf_udp_on_loopback(obs):
     assert mounts["/etc/alloy/config.alloy"]["read_only"] is True
 
 
-@requires_docker
 def test_alloy_healthcheck_and_waits_for_loki(obs):
     alloy = obs["alloy"]
     assert alloy["healthcheck"]["test"] == ALLOY_HEALTHCHECK
@@ -238,7 +227,6 @@ def test_alloy_receives_gelf_and_pushes_to_loki():
     text = _code(ALLOY_CONFIG.read_text())
     source = _block(text, 'loki.source.gelf "')
     assert 'listen_address = "0.0.0.0:12201"' in source
-    assert "loki.write." in source
 
     write = _block(text, 'loki.write "')
     assert 'url = "http://loki:3100/loki/api/v1/push"' in write
@@ -247,8 +235,20 @@ def test_alloy_receives_gelf_and_pushes_to_loki():
 def test_alloy_labels_only_service_and_host():
     text = _code(ALLOY_CONFIG.read_text())
     relabel = _block(text, 'loki.relabel "')
-    assert set(re.findall(r'target_label\s*=\s*"([^"]+)"', relabel)) == {"service", "host"}
-    sources = re.findall(r"source_labels\s*=\s*\[([^\]]*)\]", relabel)
-    assert any("__gelf_message_container_name" in s for s in sources)
+    assert set(re.findall(r'target_label\s*=\s*"([^"]+)"', relabel)) == {"host"}
+
+    # Docker's _tag arrives inside the GELF JSON, not as a label, so it is extracted.
+    process = _block(text, 'loki.process "')
+    assert re.search(r'service\s*=\s*"_tag"', process)
+    assert re.search(r'message\s*=\s*"short_message"', process)
+    labels = _block(process, "stage.labels")
+    assert set(re.findall(r"(\w+)\s*=", labels.split("{", 1)[1])) == {"values", "service"}
+    assert 'source = "message"' in _block(process, "stage.output")
     assert "external_labels" not in text
-    assert "loki.process" not in text
+
+
+def test_gelf_source_forwards_through_the_json_stage():
+    text = _code(ALLOY_CONFIG.read_text())
+    source = _block(text, 'loki.source.gelf "')
+    assert "loki.process.gelf.receiver" in source
+    assert "loki.write.local.receiver" in _block(text, 'loki.process "')
