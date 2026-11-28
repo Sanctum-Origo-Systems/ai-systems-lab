@@ -107,6 +107,39 @@ def test_no_service_mounts_docker_socket_or_state(configs):
 
 
 @requires_docker
+def test_every_image_is_pinned_by_digest(configs):
+    for where, service in _all_services(configs):
+        assert "@sha256:" in service["image"], where
+
+
+def _is_non_root_numeric(user: str) -> bool:
+    uid, _, gid = user.partition(":")
+    return uid.isdigit() and int(uid) != 0 and (not gid or (gid.isdigit() and int(gid) != 0))
+
+
+@pytest.mark.parametrize(
+    ("user", "ok"),
+    [
+        ("10001:10001", True),
+        ("473", True),
+        ("0:0", False),
+        ("0", False),
+        ("root", False),
+        ("473:0", False),
+        ("", False),
+    ],
+)
+def test_non_root_numeric_user_rule(user, ok):
+    assert _is_non_root_numeric(user) is ok
+
+
+@requires_docker
+def test_collectors_run_as_non_root_numeric_users(obs):
+    for name in ("loki", "alloy"):
+        assert _is_non_root_numeric(obs[name].get("user", "")), name
+
+
+@requires_docker
 def test_loki_is_unprivileged_unpublished_and_mounted_read_only(obs):
     loki = obs["loki"]
     assert loki["image"] == LOKI_IMAGE
